@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "mero.layout-label",
+  "name": "Layout label",
+  "version": "1.0.0",
+  "author": "Mero J.",
+  "description": "Current xkb layout with per-layout labels, click cycles",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "KeyboardLayout.qml"
+  },
+  "barWidget": {
+    "displayName": "Layout label",
+    "description": "Shows the active xkb layout using a short label you can set per layout, and cycles layouts on click. Labels come from the built-in table in KeyboardLayoutModel.js and can be overridden per bar entry with a \"labels\" object.",
+    "category": "Compositor",
+    "allowMultiple": false
+  }
+}
