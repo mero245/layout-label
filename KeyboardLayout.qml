@@ -65,13 +65,11 @@ BarWidget {
   // What the edited layout would show without a per-entry override, so the card
   // can say what it is editing on top of.
   readonly property string defaultLabelFor: KeyboardLayoutModel.shortLabel(editingLayout, layoutBriefs, {})
-  readonly property string currentOverride: layoutLabels && editingLayout && layoutLabels[editingLayout] !== undefined
-    ? String(layoutLabels[editingLayout]) : ""
+  readonly property string currentOverride: labelOverride(editingLayout, layoutFull)
   // The override for the layout the bar is actually showing, so the tooltip
   // keeps describing the label on screen rather than whatever the card last
   // edited.
-  readonly property string activeOverride: layoutLabels && activeDescription && layoutLabels[activeDescription] !== undefined
-    ? String(layoutLabels[activeDescription]) : ""
+  readonly property string activeOverride: labelOverride(activeDescription, layoutFull)
 
   // ---- Settings editing. Right-clicking the label opens a small editor that
   //      sets the per-layout label for the layout the picker names; changes
@@ -98,6 +96,18 @@ BarWidget {
       return e.layout === layout && String(e.variant || "") === variant
     })
     return (match && match.description) ? match.description : root.layoutFull
+  }
+
+  // Look up an override by the xkbcli description first, then by hyprctl's
+  // keymap name as a fallback.  This handles custom layouts whose xkbcli
+  // catalog entry is missing (so the picker and the active-description
+  // lookup use different strings) as well as any overrides that were saved
+  // before the xkbcli-based keying was introduced.
+  function labelOverride(description, keymap) {
+    var labels = root.layoutLabels || {}
+    if (description && labels[description] !== undefined) return String(labels[description])
+    if (keymap && labels[keymap] !== undefined) return String(labels[keymap])
+    return ""
   }
 
   function mergedSettings(changes) {
