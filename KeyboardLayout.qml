@@ -10,7 +10,9 @@ import "KeyboardLayoutModel.js" as KeyboardLayoutModel
 // The active xkb layout as a short clickable label. Which keyboard the seat is
 // being typed on decides the label; a click switches that keyboard's layout.
 // Labels come from KeyboardLayoutModel.js and can be overridden per bar entry
-// with a "labels" object, so each layout gets its own spelling.
+// with a "labels" object, so each layout gets its own spelling. Right-clicking
+// opens a settings card whose picker chooses which installed layout to name, so
+// a layout can be edited without switching the keyboard to it.
 BarWidget {
   id: root
   moduleName: "mero.layout-label"
@@ -37,19 +39,66 @@ BarWidget {
   // Short language code per layout description ("English (US)": "en"), read from
   // xkb's own table rather than maintained by hand.
   property var layoutBriefs: ({})
+  // The same table read as records, so the settings picker can name each
+  // configured layout by the description hyprctl reports for it.
+  property var layoutCatalog: []
+  // The selected keyboard's parallel layout/variant lists from hyprctl. The
+  // picker zips them against the catalog to list what is installed.
+  property string keyboardLayouts: ""
+  property string keyboardVariants: ""
+  // The active layout index from hyprctl, used to map the active_keymap to
+  // the xkbcli description for the same layout+variant pair.
+  property int activeLayoutIndex: 0
+  // The layout the settings card is editing. Pinned when the card opens so a
+  // keyboard switch while it is up does not retarget the edit, and chosen from
+  // the picker so any installed layout can be named without switching to it.
+  property string editingLayout: ""
+  // Every layout the typing keyboard is set to, for the card's picker.
+  readonly property var layoutChoices: KeyboardLayoutModel.configuredLayouts(layoutCatalog, keyboardLayouts, keyboardVariants)
   // Per-entry "labels" overrides, blank unless the bar entry carries them.
   readonly property var layoutLabels: root.settings && root.settings.labels ? root.settings.labels : ({})
-  readonly property string layoutLabel: KeyboardLayoutModel.shortLabel(layoutFull, layoutBriefs, layoutLabels)
-  // What this layout would show without a per-entry override, so the card can
-  // say what it is editing on top of.
-  readonly property string defaultLabelFor: KeyboardLayoutModel.shortLabel(layoutFull, layoutBriefs, {})
-  readonly property string currentOverride: layoutLabels && layoutFull && layoutLabels[layoutFull] !== undefined
-    ? String(layoutLabels[layoutFull]) : ""
+  // Look up the override by the xkbcli description for the active layout, not
+  // by hyprctl's active_keymap which can disagree on the human-readable name
+  // (e.g. hyprctl says "Arabic (No Tashkeel)" but xkbcli says "Arabic").
+  readonly property string activeDescription: descriptionForActiveLayout()
+  readonly property string layoutLabel: KeyboardLayoutModel.shortLabel(activeDescription, layoutBriefs, layoutLabels)
+  // What the edited layout would show without a per-entry override, so the card
+  // can say what it is editing on top of.
+  readonly property string defaultLabelFor: KeyboardLayoutModel.shortLabel(editingLayout, layoutBriefs, {})
+  readonly property string currentOverride: layoutLabels && editingLayout && layoutLabels[editingLayout] !== undefined
+    ? String(layoutLabels[editingLayout]) : ""
+  // The override for the layout the bar is actually showing, so the tooltip
+  // keeps describing the label on screen rather than whatever the card last
+  // edited.
+  readonly property string activeOverride: layoutLabels && activeDescription && layoutLabels[activeDescription] !== undefined
+    ? String(layoutLabels[activeDescription]) : ""
 
   // ---- Settings editing. Right-clicking the label opens a small editor that
-  //      sets the per-layout label for the layout on screen; changes persist to
-  //      shell.json the same way the built-in widgets do (updateEntryInline).
+  //      sets the per-layout label for the layout the picker names; changes
+  //      persist to shell.json the same way the built-in widgets do
+  //      (updateEntryInline).
   property string draftLabel: ""
+
+  // Map the active hyprctl layout (by index) to the xkbcli description for the
+  // same layout+variant pair. hyprctl and xkbcli can disagree on the human
+  // description for the same XKB layout (e.g. hyprctl says "Arabic (No
+  // Tashkeel)" while xkbcli says "Arabic"), so overrides must be keyed by the
+  // xkbcli description to match what the picker stores and what shortLabel can
+  // find. Falls back to layoutFull when the catalog hasn't loaded yet or the
+  // index is out of range.
+  function descriptionForActiveLayout() {
+    var layouts = String(root.keyboardLayouts || "").split(",")
+    var variants = String(root.keyboardVariants || "").split(",")
+    var idx = root.activeLayoutIndex
+    if (idx < 0 || idx >= layouts.length) return root.layoutFull
+    var layout = (layouts[idx] || "").trim()
+    var variant = (variants[idx] || "").trim()
+    if (!layout) return root.layoutFull
+    var match = (root.layoutCatalog || []).find(function (e) {
+      return e.layout === layout && String(e.variant || "") === variant
+    })
+    return (match && match.description) ? match.description : root.layoutFull
+  }
 
   function mergedSettings(changes) {
     var entry = { id: root.moduleName }
@@ -66,12 +115,12 @@ BarWidget {
   }
 
   function setLayoutLabel(value) {
-    if (!root.layoutFull) return
+    if (!root.editingLayout) return
     var labels = {}
     for (var key in root.layoutLabels) labels[key] = root.layoutLabels[key]
     var trimmed = String(value || "").trim()
-    if (trimmed !== "") labels[root.layoutFull] = trimmed
-    else delete labels[root.layoutFull]
+    if (trimmed !== "") labels[root.editingLayout] = trimmed
+    else delete labels[root.editingLayout]
     root.summarizeLabels(labels, trimmed)
     root.commitSettings({ labels: labels })
   }
@@ -86,15 +135,23 @@ BarWidget {
     root.commitSettings({ labels: {} })
   }
 
+  // Open the card on the layout the label is describing right now, then let the
+  // picker move to another. The seeding runs in the panel's onOpenChanged, which
+  // is the moment the content is guaranteed to exist.
+  function openSettings() {
+    settingsCard.open = true
+  }
+
   function toggleSettings() {
-    settingsCard.open = !settingsCard.open
+    if (settingsCard.open) settingsCard.open = false
+    else root.openSettings()
   }
 
   function summarizeLabels(labels, active) {
     if (typeof labels !== "object" || labels === null) return
     var keys = Object.keys(labels)
     var summary = keys.length > 0 ? "Per-layout labels: " + keys.length + " set." : ""
-    if (active !== undefined && active !== "") summary += " Label for \"" + root.layoutFull + "\" = \"" + active + "\"."
+    if (active !== undefined && active !== "") summary += " Label for \"" + root.editingLayout + "\" = \"" + active + "\"."
     root.editNote = summary
   }
 
@@ -215,6 +272,9 @@ BarWidget {
         root.keyboardName = String(kb.name || "")
         root.multipleLayouts = kb.layout === undefined || String(kb.layout).indexOf(",") !== -1
         root.layoutFull = kb.active_keymap
+        root.keyboardLayouts = String(kb.layout || "")
+        root.keyboardVariants = String(kb.variant || "")
+        root.activeLayoutIndex = kb.active_layout_index || 0
       }
     }
   }
@@ -228,7 +288,11 @@ BarWidget {
     command: ["xkbcli", "list", "--load-exotic"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.layoutBriefs = KeyboardLayoutModel.layoutBriefs(text)
+      onStreamFinished: {
+        var listing = text || ""
+        root.layoutBriefs = KeyboardLayoutModel.layoutBriefs(listing)
+        root.layoutCatalog = KeyboardLayoutModel.layoutEntries(listing)
+      }
     }
   }
 
@@ -277,7 +341,7 @@ BarWidget {
     text: root.layoutLabel
     fontSize: Style.font.caption
     horizontalMargin: 6
-    tooltipText: root.layoutFull + (root.currentOverride !== "" ? " · " + root.currentOverride : "")
+    tooltipText: root.layoutFull + (root.activeOverride !== "" ? " · " + root.activeOverride : "")
     onPressed: function(buttonPressed) {
       if (buttonPressed === Qt.RightButton) root.toggleSettings()
       else root.cycleLayout()
@@ -285,13 +349,23 @@ BarWidget {
   }
 
   // ---- Settings card, anchored to the label and opened by right-click above.
-  PopupCard {
+  //      Built on KeyboardPanel rather than PopupCard: its layer-shell surface
+  //      primes keyboard focus, which is what lets the label field be typed in,
+  //      where an xdg-popup only gets keys after a click routes focus through
+  //      the bar. The field is the focus target, so it is ready on open.
+  KeyboardPanel {
     id: settingsCard
     bar: root.bar
     anchorItem: button
+    focusTarget: labelField
     contentWidth: Style.space(340)
     contentHeight: settingsList.implicitHeight + settingsCard.verticalContentInset
-    onOpenChanged: if (settingsCard.open) root.draftLabel = root.currentOverride
+    onOpenChanged: {
+      if (!settingsCard.open) return
+      root.editingLayout = root.activeDescription
+      root.draftLabel = root.currentOverride
+      layoutPicker.value = root.editingLayout
+    }
 
     ColumnLayout {
       id: settingsList
@@ -336,14 +410,20 @@ BarWidget {
           elide: Text.ElideRight
         }
 
-        Text {
+        Dropdown {
+          id: layoutPicker
           Layout.fillWidth: true
-          text: root.layoutFull
-          color: Color.foreground
-          font.family: Style.font.family
-          font.pixelSize: Style.font.bodySmall
-          elide: Text.ElideMiddle
-          horizontalAlignment: Text.AlignRight
+          label: ""
+          showLabel: false
+          options: root.layoutChoices.length > 0
+            ? root.layoutChoices
+            : [{ value: root.editingLayout, label: root.editingLayout }]
+          value: root.editingLayout
+          fontFamily: Style.font.family
+          onChanged: function(value) {
+            root.editingLayout = value
+            root.draftLabel = root.currentOverride
+          }
         }
       }
 
@@ -361,12 +441,19 @@ BarWidget {
         }
 
         TextField {
+          id: labelField
           Layout.fillWidth: true
           text: root.draftLabel
           horizontalAlignment: Text.AlignHCenter
           placeholderText: root.defaultLabelFor
           onTextEdited: root.draftLabel = text
           onAccepted: root.setLayoutLabel(root.draftLabel)
+          Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_Escape) {
+              settingsCard.open = false
+              event.accepted = true
+            }
+          }
         }
 
         Button {

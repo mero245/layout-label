@@ -33,12 +33,12 @@ Example inline settings on the bar entry:
 }
 ```
 
-Clear a single layout's override with the "Forget override" button in the settings card, or "Forget all" to reset the entire `labels` map.
+Right-clicking the label opens a card with a **Layout** picker and a **Label** field. The picker lists every layout the keyboard is set to, so a layout can be named without switching to it. The card keeps editing the layout it opened on even if the keyboard layout changes while it is up. **Clear** removes the selected layout's override; **Reset labels** forgets every override.
 
 ## Behavior
 
 - **Left-click** the label: cycles to the next xkb layout on the current keyboard.
-- **Right-click** the label: opens the settings card for that layout's label.
+- **Right-click** the label: opens the settings card to name a layout.
 - Automatically discovers the keyboard being typed on; does not switch layouts for the mouse/trackpoint.
 
 ## Compatibility & limits
